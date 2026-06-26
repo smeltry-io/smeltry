@@ -7,6 +7,7 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -265,7 +266,7 @@ func clusterCreateWizard(cmd *cobra.Command) error {
 		return err
 	}
 	spec, err := runWizard(cmd.OutOrStdout(), os.Stdin, sites, profiles)
-	if err == errWizardAborted {
+	if errors.Is(err, errWizardAborted) {
 		fmt.Fprintln(cmd.OutOrStdout(), "Aborted.")
 		return nil
 	}

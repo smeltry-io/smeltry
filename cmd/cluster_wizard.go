@@ -47,8 +47,11 @@ func runWizard(w io.Writer, r io.Reader, sites []siteconfig.SiteConfig, profiles
 
 	var spec clusterSpec
 
-	// Name
+	// Name — required
 	spec.Name = prompt("Cluster name: ")
+	if spec.Name == "" {
+		return clusterSpec{}, errors.New("cluster name is required")
+	}
 
 	// Site
 	fmt.Fprintln(w, "\nAvailable sites:")
@@ -58,8 +61,11 @@ func runWizard(w io.Writer, r io.Reader, sites []siteconfig.SiteConfig, profiles
 	siteRaw := prompt(fmt.Sprintf("Site [1-%d] (default 1): ", len(sites)))
 	spec.Site = pickName(siteRaw, func(i int) string { return sites[i].Name }, len(sites))
 
-	// Machine class
+	// Machine class — required
 	spec.MachineClass = prompt("\nMachine class: ")
+	if spec.MachineClass == "" {
+		return clusterSpec{}, errors.New("machine class is required")
+	}
 
 	// Machine count
 	countRaw := prompt("Machine count [1]: ")
