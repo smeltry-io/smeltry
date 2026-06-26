@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -15,7 +16,7 @@ import (
 // fakeOIDCServer returns a test server that simulates Authentik endpoints.
 func fakeOIDCServer(t *testing.T, pollResponses []map[string]interface{}) *httptest.Server {
 	t.Helper()
-	callCount := 0
+	var callCount atomic.Int32
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/.well-known/openid-configuration":
@@ -32,9 +33,10 @@ func fakeOIDCServer(t *testing.T, pollResponses []map[string]interface{}) *httpt
 				"interval":         1,
 			})
 		case "/token":
-			resp := pollResponses[callCount]
-			if callCount < len(pollResponses)-1 {
-				callCount++
+			idx := int(callCount.Load())
+			resp := pollResponses[idx]
+			if idx < len(pollResponses)-1 {
+				callCount.Add(1)
 			}
 			if errVal, ok := resp["error"]; ok {
 				w.WriteHeader(http.StatusBadRequest)

@@ -23,7 +23,12 @@ import (
 // Usage: SMELTRY_TOKEN=<bearer> smeltry cluster list -n tenant-acme
 const EnvToken = "SMELTRY_TOKEN"
 
-var defaultScopes = []string{"openid", "email", "groups", "offline_access"}
+// minDeviceExpiry is used when the server omits expires_in in the device auth response.
+const minDeviceExpiry = 300 * time.Second
+
+func loginScopes() []string {
+	return []string{"openid", "email", "groups", "offline_access"}
+}
 
 func newAuthCmd() *cobra.Command {
 	cmd := &cobra.Command{
@@ -45,7 +50,8 @@ For CI/non-interactive environments, skip this command and set the
 SMELTRY_TOKEN environment variable instead — the token is never written
 to disk and is read fresh on every invocation.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return loginDeviceFlow(cmd, issuerURL, clientID)
+			clientIDChanged := cmd.Flags().Changed("client-id")
+			return loginDeviceFlow(cmd, issuerURL, clientID, clientIDChanged)
 		},
 	}
 	cmd.Flags().StringVar(&issuerURL, "issuer-url", "",
@@ -97,15 +103,17 @@ func newAuthStatusCmd() *cobra.Command {
 }
 
 // loginDeviceFlow performs the OIDC device authorization grant.
-func loginDeviceFlow(cmd *cobra.Command, issuerURL, clientID string) error {
+// clientIDChanged is true when --client-id was explicitly set by the user.
+func loginDeviceFlow(cmd *cobra.Command, issuerURL, clientID string, clientIDChanged bool) error {
 	// Resolve issuer URL: flag → saved config → error.
+	// Only load saved clientID when --client-id was not explicitly passed.
 	if issuerURL == "" {
 		cfg, err := auth.LoadConfig()
 		if err != nil {
 			return fmt.Errorf("--issuer-url is required on first login: %w", err)
 		}
 		issuerURL = cfg.IssuerURL
-		if clientID == "smeltry-cli" && cfg.ClientID != "" {
+		if !clientIDChanged && cfg.ClientID != "" {
 			clientID = cfg.ClientID
 		}
 	}
@@ -118,7 +126,7 @@ func loginDeviceFlow(cmd *cobra.Command, issuerURL, clientID string) error {
 		return fmt.Errorf("OIDC discovery: %w", err)
 	}
 
-	dar, err := c.StartDeviceAuth(ctx, doc.DeviceAuthEndpoint, clientID, defaultScopes)
+	dar, err := c.StartDeviceAuth(ctx, doc.DeviceAuthEndpoint, clientID, loginScopes())
 	if err != nil {
 		return fmt.Errorf("starting device flow: %w", err)
 	}
@@ -129,6 +137,9 @@ func loginDeviceFlow(cmd *cobra.Command, issuerURL, clientID string) error {
 
 	interval := time.Duration(dar.Interval) * time.Second
 	deadline := time.Duration(dar.ExpiresIn) * time.Second
+	if deadline <= 0 {
+		deadline = minDeviceExpiry
+	}
 	pollCtx, cancel := context.WithTimeout(ctx, deadline)
 	defer cancel()
 
@@ -161,8 +172,11 @@ func loginDeviceFlow(cmd *cobra.Command, issuerURL, clientID string) error {
 	return nil
 }
 
-// extractIDTokenClaims decodes the JWT payload (without signature verification)
-// to read email, groups and expiry. The kube-apiserver performs full validation.
+// extractIDTokenClaims decodes the JWT payload without verifying the signature,
+// issuer, or audience — it is used only to populate the local token cache
+// (email, groups, expiry for display). The kube-apiserver performs full
+// cryptographic validation on every API call, so a forged local cache cannot
+// grant any Kubernetes access.
 func extractIDTokenClaims(idToken string, expiresIn int) (email string, groups []string, expiry time.Time, err error) {
 	parts := strings.Split(idToken, ".")
 	if len(parts) != 3 {
