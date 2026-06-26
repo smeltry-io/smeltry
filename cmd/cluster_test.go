@@ -5,6 +5,7 @@ package cmd
 
 import (
 	"bytes"
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -88,6 +89,98 @@ func TestRequireNamespace_Present(t *testing.T) {
 	cmd := newClusterListCmd()
 	if err := requireNamespace(cmd, nil); err != nil {
 		t.Errorf("expected no error when namespace is set, got: %v", err)
+	}
+}
+
+func TestWaitTimeout_Default(t *testing.T) {
+	old := global.Timeout
+	global.Timeout = ""
+	defer func() { global.Timeout = old }()
+
+	d, err := waitTimeout()
+	if err != nil {
+		t.Fatalf("waitTimeout default: %v", err)
+	}
+	if d != 10*time.Minute {
+		t.Errorf("expected 10m default, got %v", d)
+	}
+}
+
+func TestWaitTimeout_Custom(t *testing.T) {
+	old := global.Timeout
+	global.Timeout = "5m"
+	defer func() { global.Timeout = old }()
+
+	d, err := waitTimeout()
+	if err != nil {
+		t.Fatalf("waitTimeout custom: %v", err)
+	}
+	if d != 5*time.Minute {
+		t.Errorf("expected 5m, got %v", d)
+	}
+}
+
+func TestWaitTimeout_Invalid(t *testing.T) {
+	old := global.Timeout
+	global.Timeout = "not-a-duration"
+	defer func() { global.Timeout = old }()
+
+	_, err := waitTimeout()
+	if err == nil {
+		t.Error("expected error for invalid timeout, got nil")
+	}
+}
+
+func TestClusterCreateFromFile_ValidManifest(t *testing.T) {
+	// Write a minimal ClusterClaim manifest to a temp file.
+	manifest := `
+apiVersion: portal.smeltry.io/v1alpha1
+kind: ClusterClaim
+metadata:
+  name: test-cluster
+  namespace: tenant-acme
+spec:
+  site: paris-dc1
+  machineClass: standard
+  machineCount: 2
+`
+	f, err := os.CreateTemp(t.TempDir(), "cc-*.yaml")
+	if err != nil {
+		t.Fatalf("TempFile: %v", err)
+	}
+	if _, err := f.WriteString(manifest); err != nil {
+		t.Fatalf("WriteString: %v", err)
+	}
+	f.Close()
+
+	// clusterCreateFromFile calls k8sclient.New which needs a valid kubeconfig.
+	// We only test the file parsing part by checking the error is not about YAML.
+	// A real integration test would require a live cluster.
+	err = clusterCreateFromFile(newClusterCreateCmd(), f.Name())
+	// The error (if any) must be about the kube client, not about file parsing.
+	if err != nil && strings.Contains(err.Error(), "parsing manifest") {
+		t.Errorf("manifest parsing failed: %v", err)
+	}
+}
+
+func TestClusterCreateFromFile_InvalidYAML(t *testing.T) {
+	f, err := os.CreateTemp(t.TempDir(), "cc-*.yaml")
+	if err != nil {
+		t.Fatalf("TempFile: %v", err)
+	}
+	f.WriteString("{{invalid yaml{{")
+	f.Close()
+
+	err = clusterCreateFromFile(newClusterCreateCmd(), f.Name())
+	if err == nil {
+		t.Error("expected error for invalid YAML, got nil")
+	}
+}
+
+func TestClusterCreateFromFile_MissingFile(t *testing.T) {
+	err := clusterCreateFromFile(newClusterCreateCmd(), "/nonexistent/path.yaml")
+	if err == nil {
+		t.Error("expected error for missing file, got nil")
 	}
 }
 

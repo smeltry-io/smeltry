@@ -9,10 +9,14 @@ import (
 	"context"
 	"fmt"
 
+	k8serrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	unstructuredPkg "k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/client-go/dynamic"
 )
+
+func isNotFound(err error) bool { return k8serrors.IsNotFound(err) }
 
 var gvr = schema.GroupVersionResource{
 	Group:    "portal.smeltry.io",
@@ -61,6 +65,40 @@ func (c *Client) Get(ctx context.Context, namespace, name string) (*ClusterClaim
 		return nil, fmt.Errorf("getting ClusterClaim %q: %w", name, err)
 	}
 	cc := fromUnstructured(obj.Object)
+	return &cc, nil
+}
+
+// Delete deletes a ClusterClaim by name.
+func (c *Client) Delete(ctx context.Context, namespace, name string) error {
+	err := c.dyn.Resource(gvr).Namespace(namespace).Delete(ctx, name, metav1.DeleteOptions{})
+	if err != nil {
+		return fmt.Errorf("deleting ClusterClaim %q: %w", name, err)
+	}
+	return nil
+}
+
+// IsGone returns true when a Get for the given name returns a Not Found error,
+// meaning the resource has been fully deleted. Used by --wait on delete.
+func (c *Client) IsGone(ctx context.Context, namespace, name string) (bool, error) {
+	_, err := c.dyn.Resource(gvr).Namespace(namespace).Get(ctx, name, metav1.GetOptions{})
+	if err == nil {
+		return false, nil
+	}
+	// Any error other than Not Found is unexpected — surface it.
+	if isNotFound(err) {
+		return true, nil
+	}
+	return false, err
+}
+
+// Create applies an unstructured ClusterClaim object.
+func (c *Client) Create(ctx context.Context, namespace string, obj map[string]interface{}) (*ClusterClaim, error) {
+	result, err := c.dyn.Resource(gvr).Namespace(namespace).Create(ctx,
+		&unstructuredPkg.Unstructured{Object: obj}, metav1.CreateOptions{})
+	if err != nil {
+		return nil, fmt.Errorf("creating ClusterClaim: %w", err)
+	}
+	cc := fromUnstructured(result.Object)
 	return &cc, nil
 }
 

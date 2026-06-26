@@ -122,3 +122,70 @@ func TestGet_WrongNamespace(t *testing.T) {
 		t.Error("expected error when fetching from wrong namespace, got nil")
 	}
 }
+
+func TestDelete_RemovesClaim(t *testing.T) {
+	cc := makeCC("ml-train", "tenant-acme", "Ready", "paris-dc1", "gpu-large", 3)
+	c := NewClient(newFakeDyn(cc))
+
+	if err := c.Delete(context.Background(), "tenant-acme", "ml-train"); err != nil {
+		t.Fatalf("Delete: %v", err)
+	}
+	_, err := c.Get(context.Background(), "tenant-acme", "ml-train")
+	if err == nil {
+		t.Error("expected error after delete, got nil")
+	}
+}
+
+func TestDelete_NotFound(t *testing.T) {
+	c := NewClient(newFakeDyn())
+	err := c.Delete(context.Background(), "tenant-acme", "nonexistent")
+	if err == nil {
+		t.Error("expected error deleting nonexistent ClusterClaim, got nil")
+	}
+}
+
+func TestIsGone_TrueAfterDelete(t *testing.T) {
+	cc := makeCC("ml-train", "tenant-acme", "Ready", "paris-dc1", "gpu-large", 3)
+	c := NewClient(newFakeDyn(cc))
+
+	if err := c.Delete(context.Background(), "tenant-acme", "ml-train"); err != nil {
+		t.Fatalf("Delete: %v", err)
+	}
+	gone, err := c.IsGone(context.Background(), "tenant-acme", "ml-train")
+	if err != nil {
+		t.Fatalf("IsGone: %v", err)
+	}
+	if !gone {
+		t.Error("expected IsGone=true after delete")
+	}
+}
+
+func TestIsGone_FalseWhenPresent(t *testing.T) {
+	cc := makeCC("ml-train", "tenant-acme", "Ready", "paris-dc1", "gpu-large", 3)
+	c := NewClient(newFakeDyn(cc))
+
+	gone, err := c.IsGone(context.Background(), "tenant-acme", "ml-train")
+	if err != nil {
+		t.Fatalf("IsGone: %v", err)
+	}
+	if gone {
+		t.Error("expected IsGone=false for existing ClusterClaim")
+	}
+}
+
+func TestCreate_ReturnsNewClaim(t *testing.T) {
+	c := NewClient(newFakeDyn())
+	obj := map[string]interface{}{
+		"apiVersion": "portal.smeltry.io/v1alpha1",
+		"kind":       "ClusterClaim",
+		"metadata":   map[string]interface{}{"name": "new-cluster", "namespace": "tenant-acme"},
+		"spec":       map[string]interface{}{"site": "paris-dc1", "machineClass": "standard", "machineCount": int64(2)},
+	}
+	got, err := c.Create(context.Background(), "tenant-acme", obj)
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	if got.Name != "new-cluster" {
+		t.Errorf("Name: got %q want %q", got.Name, "new-cluster")
+	}
+}

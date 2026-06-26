@@ -4,9 +4,12 @@
 package cmd
 
 import (
+	"bufio"
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
+	"strings"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -14,6 +17,7 @@ import (
 
 	"github.com/smeltry-io/smeltry/internal/clusterclaim"
 	"github.com/smeltry-io/smeltry/internal/k8sclient"
+	"github.com/smeltry-io/smeltry/internal/poller"
 	"github.com/smeltry-io/smeltry/internal/table"
 )
 
@@ -75,9 +79,15 @@ func newClusterGetCmd() *cobra.Command {
 func newClusterCreateCmd() *cobra.Command {
 	var file string
 	cmd := &cobra.Command{
-		Use:   "create",
-		Short: "Create a ClusterClaim (interactive wizard or --file)",
-		RunE:  notImplemented,
+		Use:     "create",
+		Short:   "Create a ClusterClaim (interactive wizard or --file)",
+		PreRunE: requireNamespace,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if file == "" {
+				return notImplemented(cmd, args) // wizard — next story
+			}
+			return clusterCreateFromFile(cmd, file)
+		},
 	}
 	cmd.Flags().StringVarP(&file, "file", "f", "", "Path to a ClusterClaim manifest (skips interactive wizard)")
 	return cmd
@@ -85,10 +95,44 @@ func newClusterCreateCmd() *cobra.Command {
 
 func newClusterDeleteCmd() *cobra.Command {
 	return &cobra.Command{
-		Use:   "delete <name>",
-		Short: "Delete a ClusterClaim",
-		Args:  cobra.ExactArgs(1),
-		RunE:  notImplemented,
+		Use:     "delete <name>",
+		Short:   "Delete a ClusterClaim",
+		Args:    cobra.ExactArgs(1),
+		PreRunE: requireNamespace,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			name := args[0]
+
+			// Interactive confirmation.
+			if !confirmDelete(cmd, name, global.Namespace) {
+				fmt.Fprintln(cmd.OutOrStdout(), "Aborted.")
+				return nil
+			}
+
+			dyn, err := k8sclient.New(global.Server)
+			if err != nil {
+				return err
+			}
+			cc := clusterclaim.NewClient(dyn)
+
+			if err := cc.Delete(context.Background(), global.Namespace, name); err != nil {
+				return err
+			}
+			fmt.Fprintf(cmd.OutOrStdout(), "ClusterClaim %q deleted.\n", name)
+
+			if !global.Wait {
+				return nil
+			}
+			timeout, err := waitTimeout()
+			if err != nil {
+				return err
+			}
+			ctx, cancel := context.WithTimeout(context.Background(), timeout)
+			defer cancel()
+			fmt.Fprintf(cmd.OutOrStdout(), "Waiting for %q to be fully removed...\n", name)
+			return poller.UntilDone(ctx, poller.DefaultInterval, func(ctx context.Context) (bool, error) {
+				return cc.IsGone(ctx, global.Namespace, name)
+			})
+		},
 	}
 }
 
@@ -165,6 +209,55 @@ func encodeYAML(cmd *cobra.Command, v any) error {
 	}
 	_, err = fmt.Fprint(cmd.OutOrStdout(), string(b))
 	return err
+}
+
+// clusterCreateFromFile reads a YAML/JSON manifest and creates the ClusterClaim.
+func clusterCreateFromFile(cmd *cobra.Command, path string) error {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return fmt.Errorf("reading file %q: %w", path, err)
+	}
+	// Convert YAML → JSON → map so we can pass it to the dynamic client.
+	jsonBytes, err := yaml.YAMLToJSON(data)
+	if err != nil {
+		return fmt.Errorf("parsing manifest: %w", err)
+	}
+	var obj map[string]interface{}
+	if err := json.Unmarshal(jsonBytes, &obj); err != nil {
+		return fmt.Errorf("unmarshalling manifest: %w", err)
+	}
+
+	dyn, err := k8sclient.New(global.Server)
+	if err != nil {
+		return err
+	}
+	cc, err := clusterclaim.NewClient(dyn).Create(context.Background(), global.Namespace, obj)
+	if err != nil {
+		return err
+	}
+	fmt.Fprintf(cmd.OutOrStdout(), "ClusterClaim %q created (phase: %s).\n", cc.Name, cc.Phase)
+	return nil
+}
+
+// confirmDelete prompts the user to confirm deletion by typing the resource name.
+func confirmDelete(cmd *cobra.Command, name, namespace string) bool {
+	fmt.Fprintf(cmd.OutOrStdout(),
+		"Delete ClusterClaim %q from namespace %q? Type the name to confirm: ", name, namespace)
+	scanner := bufio.NewScanner(os.Stdin)
+	scanner.Scan()
+	return strings.TrimSpace(scanner.Text()) == name
+}
+
+// waitTimeout parses global.Timeout or returns a sensible default (10m).
+func waitTimeout() (time.Duration, error) {
+	if global.Timeout == "" {
+		return 10 * time.Minute, nil
+	}
+	d, err := time.ParseDuration(global.Timeout)
+	if err != nil {
+		return 0, fmt.Errorf("invalid --timeout %q: %w", global.Timeout, err)
+	}
+	return d, nil
 }
 
 // requireNamespace is a PreRunE that enforces the --namespace flag.
