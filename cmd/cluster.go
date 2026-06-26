@@ -4,12 +4,10 @@
 package cmd
 
 import (
-	"bufio"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"os"
 	"strings"
 	"time"
@@ -108,7 +106,7 @@ func newClusterDeleteCmd() *cobra.Command {
 			name := args[0]
 
 			// Interactive confirmation.
-			if !confirmDelete(cmd, os.Stdin, name, global.Namespace) {
+			if !confirmResourceDelete(cmd.OutOrStdout(), os.Stdin, "ClusterClaim", name, global.Namespace) {
 				fmt.Fprintln(cmd.OutOrStdout(), "Aborted.")
 				return nil
 			}
@@ -284,27 +282,15 @@ func clusterCreateWizard(cmd *cobra.Command) error {
 
 // clusterCreateFromFile reads a YAML/JSON manifest and creates the ClusterClaim.
 func clusterCreateFromFile(cmd *cobra.Command, path string) error {
-	data, err := os.ReadFile(path)
+	obj, ns, err := loadManifest(path)
 	if err != nil {
-		return fmt.Errorf("reading file %q: %w", path, err)
+		return err
 	}
-	// Convert YAML → JSON → map so we can pass it to the dynamic client.
-	jsonBytes, err := yaml.YAMLToJSON(data)
-	if err != nil {
-		return fmt.Errorf("parsing manifest: %w", err)
-	}
-	var obj map[string]interface{}
-	if err := json.Unmarshal(jsonBytes, &obj); err != nil {
-		return fmt.Errorf("unmarshalling manifest: %w", err)
-	}
-
-	// Warn if the manifest declares a different namespace than --namespace.
-	if ns, ok := obj["metadata"].(map[string]interface{})["namespace"].(string); ok && ns != "" && ns != global.Namespace {
+	if ns != "" && ns != global.Namespace {
 		fmt.Fprintf(cmd.OutOrStdout(),
 			"Warning: manifest namespace %q differs from --namespace %q; using %q\n",
 			ns, global.Namespace, global.Namespace)
 	}
-
 	dyn, err := k8sclient.New(global.Server)
 	if err != nil {
 		return err
@@ -315,16 +301,6 @@ func clusterCreateFromFile(cmd *cobra.Command, path string) error {
 	}
 	fmt.Fprintf(cmd.OutOrStdout(), "ClusterClaim %q created (phase: %s).\n", cc.Name, cc.Phase)
 	return nil
-}
-
-// confirmDelete prompts the user to confirm deletion by typing the resource name.
-// r is the reader for confirmation input (use os.Stdin in production).
-func confirmDelete(cmd *cobra.Command, r io.Reader, name, namespace string) bool {
-	fmt.Fprintf(cmd.OutOrStdout(),
-		"Delete ClusterClaim %q from namespace %q? Type the name to confirm: ", name, namespace)
-	scanner := bufio.NewScanner(r)
-	scanner.Scan()
-	return strings.TrimSpace(scanner.Text()) == name
 }
 
 func boolStr(b bool) string {

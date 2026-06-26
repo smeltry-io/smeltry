@@ -190,7 +190,7 @@ func TestConfirmDelete_Confirmed(t *testing.T) {
 	cmd.SetOut(&buf)
 
 	r := strings.NewReader("ml-train\n")
-	if !confirmDelete(cmd, r, "ml-train", "tenant-acme") {
+	if !confirmResourceDelete(cmd.OutOrStdout(), r, "ClusterClaim", "ml-train", "tenant-acme") {
 		t.Error("expected confirmDelete to return true when name matches")
 	}
 }
@@ -201,7 +201,7 @@ func TestConfirmDelete_Rejected(t *testing.T) {
 	cmd.SetOut(&buf)
 
 	r := strings.NewReader("wrong-name\n")
-	if confirmDelete(cmd, r, "ml-train", "tenant-acme") {
+	if confirmResourceDelete(cmd.OutOrStdout(), r, "ClusterClaim", "ml-train", "tenant-acme") {
 		t.Error("expected confirmDelete to return false when name does not match")
 	}
 }
@@ -212,7 +212,7 @@ func TestConfirmDelete_EmptyInput(t *testing.T) {
 	cmd.SetOut(&buf)
 
 	r := strings.NewReader("")
-	if confirmDelete(cmd, r, "ml-train", "tenant-acme") {
+	if confirmResourceDelete(cmd.OutOrStdout(), r, "ClusterClaim", "ml-train", "tenant-acme") {
 		t.Error("expected confirmDelete to return false on empty input (e.g. closed stdin)")
 	}
 }
