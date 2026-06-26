@@ -184,20 +184,78 @@ func TestClusterCreateFromFile_MissingFile(t *testing.T) {
 	}
 }
 
-func TestHumanAge(t *testing.T) {
-	tests := []struct {
-		offset time.Duration
-		want   string
-	}{
-		{30 * time.Second, "30s"},
-		{90 * time.Second, "1m"},
-		{3600 * time.Second, "1h"},
-		{86400 * time.Second, "1d"},
+func TestConfirmDelete_Confirmed(t *testing.T) {
+	cmd := newClusterDeleteCmd()
+	var buf bytes.Buffer
+	cmd.SetOut(&buf)
+
+	r := strings.NewReader("ml-train\n")
+	if !confirmDelete(cmd, r, "ml-train", "tenant-acme") {
+		t.Error("expected confirmDelete to return true when name matches")
 	}
-	for _, tt := range tests {
-		got := humanAge(time.Now().Add(-tt.offset))
-		if got != tt.want {
-			t.Errorf("humanAge(-%v): got %q want %q", tt.offset, got, tt.want)
-		}
+}
+
+func TestConfirmDelete_Rejected(t *testing.T) {
+	cmd := newClusterDeleteCmd()
+	var buf bytes.Buffer
+	cmd.SetOut(&buf)
+
+	r := strings.NewReader("wrong-name\n")
+	if confirmDelete(cmd, r, "ml-train", "tenant-acme") {
+		t.Error("expected confirmDelete to return false when name does not match")
+	}
+}
+
+func TestConfirmDelete_EmptyInput(t *testing.T) {
+	cmd := newClusterDeleteCmd()
+	var buf bytes.Buffer
+	cmd.SetOut(&buf)
+
+	r := strings.NewReader("")
+	if confirmDelete(cmd, r, "ml-train", "tenant-acme") {
+		t.Error("expected confirmDelete to return false on empty input (e.g. closed stdin)")
+	}
+}
+
+func TestBoolStr(t *testing.T) {
+	if boolStr(true) != "true" {
+		t.Error("boolStr(true) should return \"true\"")
+	}
+	if boolStr(false) != "false" {
+		t.Error("boolStr(false) should return \"false\"")
+	}
+}
+
+func TestClusterCreateFromFile_NamespaceMismatch(t *testing.T) {
+	manifest := `
+apiVersion: portal.smeltry.io/v1alpha1
+kind: ClusterClaim
+metadata:
+  name: test-cluster
+  namespace: other-namespace
+spec:
+  site: paris-dc1
+  machineClass: standard
+  machineCount: 2
+`
+	f, err := os.CreateTemp(t.TempDir(), "cc-*.yaml")
+	if err != nil {
+		t.Fatalf("TempFile: %v", err)
+	}
+	f.WriteString(manifest)
+	f.Close()
+
+	old := global.Namespace
+	global.Namespace = "tenant-acme"
+	defer func() { global.Namespace = old }()
+
+	cmd := newClusterCreateCmd()
+	var buf bytes.Buffer
+	cmd.SetOut(&buf)
+
+	// We only care that a warning is printed, not about the kube error.
+	_ = clusterCreateFromFile(cmd, f.Name())
+	if !strings.Contains(buf.String(), "Warning") {
+		t.Errorf("expected namespace mismatch warning, got: %q", buf.String())
 	}
 }

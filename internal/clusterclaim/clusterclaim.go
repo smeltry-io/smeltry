@@ -8,6 +8,7 @@ package clusterclaim
 import (
 	"context"
 	"fmt"
+	"time"
 
 	k8serrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -112,7 +113,26 @@ func fromUnstructured(obj map[string]interface{}) ClusterClaim {
 		Class:     strField(obj, "spec", "machineClass"),
 		Count:     intField(obj, "spec", "machineCount"),
 	}
+	if ts := strField(obj, "metadata", "creationTimestamp"); ts != "" {
+		if t, err := time.Parse(time.RFC3339, ts); err == nil {
+			cc.Age = humanAge(t)
+		}
+	}
 	return cc
+}
+
+func humanAge(t time.Time) string {
+	d := time.Since(t)
+	switch {
+	case d < time.Minute:
+		return fmt.Sprintf("%ds", int(d.Seconds()))
+	case d < time.Hour:
+		return fmt.Sprintf("%dm", int(d.Minutes()))
+	case d < 24*time.Hour:
+		return fmt.Sprintf("%dh", int(d.Hours()))
+	default:
+		return fmt.Sprintf("%dd", int(d.Hours()/24))
+	}
 }
 
 func strField(obj map[string]interface{}, keys ...string) string {

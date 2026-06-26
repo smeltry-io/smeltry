@@ -8,6 +8,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"strings"
 	"time"
@@ -104,7 +105,7 @@ func newClusterDeleteCmd() *cobra.Command {
 			name := args[0]
 
 			// Interactive confirmation.
-			if !confirmDelete(cmd, name, global.Namespace) {
+			if !confirmDelete(cmd, os.Stdin, name, global.Namespace) {
 				fmt.Fprintln(cmd.OutOrStdout(), "Aborted.")
 				return nil
 			}
@@ -181,15 +182,7 @@ func newClusterAddonsCmd() *cobra.Command {
 			t := table.New(cmd.OutOrStdout())
 			t.Header("NAME", "READY", "BOOTSTRAP")
 			for _, hr := range items {
-				ready := "false"
-				if hr.Ready {
-					ready = "true"
-				}
-				bootstrap := "false"
-				if hr.Bootstrap {
-					bootstrap = "true"
-				}
-				if err := t.Append(hr.Name, ready, bootstrap); err != nil {
+				if err := t.Append(hr.Name, boolStr(hr.Ready), boolStr(hr.Bootstrap)); err != nil {
 					return err
 				}
 			}
@@ -271,6 +264,13 @@ func clusterCreateFromFile(cmd *cobra.Command, path string) error {
 		return fmt.Errorf("unmarshalling manifest: %w", err)
 	}
 
+	// Warn if the manifest declares a different namespace than --namespace.
+	if ns, ok := obj["metadata"].(map[string]interface{})["namespace"].(string); ok && ns != "" && ns != global.Namespace {
+		fmt.Fprintf(cmd.OutOrStdout(),
+			"Warning: manifest namespace %q differs from --namespace %q; using %q\n",
+			ns, global.Namespace, global.Namespace)
+	}
+
 	dyn, err := k8sclient.New(global.Server)
 	if err != nil {
 		return err
@@ -284,12 +284,20 @@ func clusterCreateFromFile(cmd *cobra.Command, path string) error {
 }
 
 // confirmDelete prompts the user to confirm deletion by typing the resource name.
-func confirmDelete(cmd *cobra.Command, name, namespace string) bool {
+// r is the reader for confirmation input (use os.Stdin in production).
+func confirmDelete(cmd *cobra.Command, r io.Reader, name, namespace string) bool {
 	fmt.Fprintf(cmd.OutOrStdout(),
 		"Delete ClusterClaim %q from namespace %q? Type the name to confirm: ", name, namespace)
-	scanner := bufio.NewScanner(os.Stdin)
+	scanner := bufio.NewScanner(r)
 	scanner.Scan()
 	return strings.TrimSpace(scanner.Text()) == name
+}
+
+func boolStr(b bool) string {
+	if b {
+		return "true"
+	}
+	return "false"
 }
 
 // waitTimeout parses global.Timeout or returns a sensible default (10m).
@@ -312,17 +320,3 @@ func requireNamespace(cmd *cobra.Command, _ []string) error {
 	return nil
 }
 
-// humanAge returns a human-readable duration since t.
-func humanAge(t time.Time) string {
-	d := time.Since(t)
-	switch {
-	case d < time.Minute:
-		return fmt.Sprintf("%ds", int(d.Seconds()))
-	case d < time.Hour:
-		return fmt.Sprintf("%dm", int(d.Minutes()))
-	case d < 24*time.Hour:
-		return fmt.Sprintf("%dh", int(d.Hours()))
-	default:
-		return fmt.Sprintf("%dd", int(d.Hours()/24))
-	}
-}

@@ -6,6 +6,7 @@ package clusterclaim
 import (
 	"context"
 	"testing"
+	"time"
 
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -170,6 +171,24 @@ func TestIsGone_FalseWhenPresent(t *testing.T) {
 	}
 	if gone {
 		t.Error("expected IsGone=false for existing ClusterClaim")
+	}
+}
+
+func TestHumanAge(t *testing.T) {
+	tests := []struct {
+		offset time.Duration
+		want   string
+	}{
+		{30 * time.Second, "30s"},
+		{90 * time.Second, "1m"},
+		{3600 * time.Second, "1h"},
+		{86400 * time.Second, "1d"},
+	}
+	for _, tt := range tests {
+		got := humanAge(time.Now().Add(-tt.offset))
+		if got != tt.want {
+			t.Errorf("humanAge(-%v): got %q want %q", tt.offset, got, tt.want)
+		}
 	}
 }
 
