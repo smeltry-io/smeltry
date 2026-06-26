@@ -13,7 +13,7 @@ import (
 	"github.com/smeltry-io/smeltry/internal/siteconfig"
 )
 
-var knownOS = []string{"flatcar", "ubuntu"}
+func supportedOS() []string { return []string{"flatcar", "ubuntu"} }
 
 type serverSpec struct {
 	name         string
@@ -73,9 +73,10 @@ func pickSite(w io.Writer, scan *bufio.Scanner, sites []siteconfig.SiteConfig) (
 }
 
 func pickOS(w io.Writer, scan *bufio.Scanner) (string, error) {
+	osList := supportedOS()
 	fmt.Fprintln(w, "\nAvailable operating systems:")
-	for i, os := range knownOS {
-		fmt.Fprintf(w, "  [%d] %s\n", i+1, os)
+	for i, osName := range osList {
+		fmt.Fprintf(w, "  [%d] %s\n", i+1, osName)
 	}
 	fmt.Fprint(w, "Select OS (number): ")
 	if !scan.Scan() {
@@ -86,10 +87,10 @@ func pickOS(w io.Writer, scan *bufio.Scanner) (string, error) {
 		return "", errWizardAborted
 	}
 	n, err := strconv.Atoi(raw)
-	if err != nil || n < 1 || n > len(knownOS) {
+	if err != nil || n < 1 || n > len(osList) {
 		return "", fmt.Errorf("invalid OS selection %q", raw)
 	}
-	return knownOS[n-1], nil
+	return osList[n-1], nil
 }
 
 func promptString(w io.Writer, scan *bufio.Scanner, prompt string) (string, error) {
