@@ -15,6 +15,7 @@ import (
 	"github.com/spf13/cobra"
 	"sigs.k8s.io/yaml"
 
+	"github.com/smeltry-io/smeltry/internal/addon"
 	"github.com/smeltry-io/smeltry/internal/clusterclaim"
 	"github.com/smeltry-io/smeltry/internal/k8sclient"
 	"github.com/smeltry-io/smeltry/internal/poller"
@@ -137,20 +138,63 @@ func newClusterDeleteCmd() *cobra.Command {
 }
 
 func newClusterKubeconfigCmd() *cobra.Command {
-	return &cobra.Command{
-		Use:   "kubeconfig <name>",
-		Short: "Print the Headlamp deep-link to download the cluster kubeconfig",
-		Args:  cobra.ExactArgs(1),
-		RunE:  notImplemented,
+	var headlampURL string
+	cmd := &cobra.Command{
+		Use:     "kubeconfig <name>",
+		Short:   "Print the Headlamp deep-link to download the cluster kubeconfig",
+		Args:    cobra.ExactArgs(1),
+		PreRunE: requireNamespace,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			name := args[0]
+			// The kubeconfig is stored in secret "<name>-kubeconfig" in the tenant
+			// namespace. Tenants cannot list secrets globally, so the download goes
+			// through Headlamp which has the necessary RBAC. We print a deep-link.
+			secretName := fmt.Sprintf("%s-kubeconfig", name)
+			link := fmt.Sprintf("%s/c/local/namespaces/%s/secrets/%s",
+				strings.TrimRight(headlampURL, "/"), global.Namespace, secretName)
+			fmt.Fprintf(cmd.OutOrStdout(),
+				"Download kubeconfig for %q via Headlamp:\n  %s\n", name, link)
+			return nil
+		},
 	}
+	cmd.Flags().StringVar(&headlampURL, "headlamp-url", "http://localhost:4466",
+		"Base URL of the Headlamp instance")
+	return cmd
 }
 
 func newClusterAddonsCmd() *cobra.Command {
 	return &cobra.Command{
-		Use:   "addons <name>",
-		Short: "List addon HelmReleases and their status for a ClusterClaim",
-		Args:  cobra.ExactArgs(1),
-		RunE:  notImplemented,
+		Use:     "addons <name>",
+		Short:   "List addon HelmReleases and their status for a ClusterClaim",
+		Args:    cobra.ExactArgs(1),
+		PreRunE: requireNamespace,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			name := args[0]
+			dyn, err := k8sclient.New(global.Server)
+			if err != nil {
+				return err
+			}
+			items, err := addon.NewClient(dyn).ListForCluster(context.Background(), global.Namespace, name)
+			if err != nil {
+				return err
+			}
+			t := table.New(cmd.OutOrStdout())
+			t.Header("NAME", "READY", "BOOTSTRAP")
+			for _, hr := range items {
+				ready := "false"
+				if hr.Ready {
+					ready = "true"
+				}
+				bootstrap := "false"
+				if hr.Bootstrap {
+					bootstrap = "true"
+				}
+				if err := t.Append(hr.Name, ready, bootstrap); err != nil {
+					return err
+				}
+			}
+			return t.Render()
+		},
 	}
 }
 
