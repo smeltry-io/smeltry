@@ -76,6 +76,39 @@ func TestListDevices_HTTPError(t *testing.T) {
 	}
 }
 
+func TestListDevices_Pagination(t *testing.T) {
+	var srv *httptest.Server
+	srv = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Query().Get("offset") == "1" {
+			json.NewEncoder(w).Encode(map[string]interface{}{
+				"count":   2,
+				"next":    nil,
+				"results": []Device{{ID: 2, Name: "server-02"}},
+			})
+		} else {
+			nextURL := "http://" + r.Host + r.URL.Path + "?offset=1"
+			json.NewEncoder(w).Encode(map[string]interface{}{
+				"count":   2,
+				"next":    nextURL,
+				"results": []Device{{ID: 1, Name: "server-01"}},
+			})
+		}
+	}))
+	defer srv.Close()
+
+	c := NewClient(srv.URL, "tok")
+	got, err := c.ListDevices(context.Background(), ListDevicesParams{})
+	if err != nil {
+		t.Fatalf("ListDevices pagination: %v", err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("expected 2 devices across pages, got %d", len(got))
+	}
+	if got[0].Name != "server-01" || got[1].Name != "server-02" {
+		t.Errorf("unexpected names: %v", []string{got[0].Name, got[1].Name})
+	}
+}
+
 func TestListDevices_SiteFilter(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		site := r.URL.Query().Get("site")

@@ -71,7 +71,8 @@ func newAdminMachineCmd() *cobra.Command {
 		},
 	}
 	listCmd.Flags().StringVar(&netboxURL, "netbox-url", "", "Netbox base URL (e.g. https://netbox.example.com)")
-	listCmd.Flags().StringVar(&netboxToken, "netbox-token", "", "Netbox API token (or set NETBOX_TOKEN)")
+	listCmd.Flags().StringVar(&netboxToken, "netbox-token", "", "Netbox API token (prefer NETBOX_TOKEN env var to avoid exposure in shell history)")
+	listCmd.Flags().Lookup("netbox-token").Hidden = true
 	listCmd.Flags().StringVar(&site, "site", "", "Filter by site slug")
 	listCmd.Flags().StringVar(&status, "status", "", "Filter by device status (e.g. active, staged)")
 	cmd.AddCommand(listCmd)

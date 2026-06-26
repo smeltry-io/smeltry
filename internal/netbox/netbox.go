@@ -63,10 +63,12 @@ type ListDevicesParams struct {
 
 type listResponse struct {
 	Count   int      `json:"count"`
+	Next    *string  `json:"next"`
 	Results []Device `json:"results"`
 }
 
-// ListDevices returns all devices matching the given filters.
+// ListDevices returns all devices matching the given filters, following
+// Netbox pagination automatically.
 func (c *Client) ListDevices(ctx context.Context, params ListDevicesParams) ([]Device, error) {
 	u, err := url.Parse(c.baseURL + "/api/dcim/devices/")
 	if err != nil {
@@ -81,26 +83,44 @@ func (c *Client) ListDevices(ctx context.Context, params ListDevicesParams) ([]D
 	}
 	u.RawQuery = q.Encode()
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u.String(), nil)
+	var all []Device
+	nextURL := u.String()
+	for nextURL != "" {
+		page, next, err := c.fetchPage(ctx, nextURL)
+		if err != nil {
+			return nil, err
+		}
+		all = append(all, page...)
+		nextURL = next
+	}
+	return all, nil
+}
+
+func (c *Client) fetchPage(ctx context.Context, pageURL string) ([]Device, string, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, pageURL, nil)
 	if err != nil {
-		return nil, fmt.Errorf("building request: %w", err)
+		return nil, "", fmt.Errorf("building request: %w", err)
 	}
 	req.Header.Set("Authorization", "Token "+c.token)
 	req.Header.Set("Accept", "application/json")
 
 	resp, err := c.http.Do(req)
 	if err != nil {
-		return nil, fmt.Errorf("netbox request: %w", err)
+		return nil, "", fmt.Errorf("netbox request: %w", err)
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("netbox returned HTTP %d", resp.StatusCode)
+		return nil, "", fmt.Errorf("netbox returned HTTP %d", resp.StatusCode)
 	}
 
 	var result listResponse
 	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		return nil, fmt.Errorf("decoding response: %w", err)
+		return nil, "", fmt.Errorf("decoding response: %w", err)
 	}
-	return result.Results, nil
+	next := ""
+	if result.Next != nil {
+		next = *result.Next
+	}
+	return result.Results, next, nil
 }

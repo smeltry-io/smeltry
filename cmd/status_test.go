@@ -30,10 +30,10 @@ func TestFormatStatus_OperatorReady(t *testing.T) {
 	if !strings.Contains(out, "v0.1.0") {
 		t.Errorf("expected version in output, got:\n%s", out)
 	}
-	if !strings.Contains(out, "3") {
+	if !strings.Contains(out, "ClusterClaims:  3") {
 		t.Errorf("expected ClusterClaims count in output, got:\n%s", out)
 	}
-	if !strings.Contains(out, "2") {
+	if !strings.Contains(out, "ServerClaims:   2") {
 		t.Errorf("expected ServerClaims count in output, got:\n%s", out)
 	}
 }
