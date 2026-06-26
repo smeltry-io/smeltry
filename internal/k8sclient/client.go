@@ -6,6 +6,7 @@ package k8sclient
 
 import (
 	"fmt"
+	"os"
 
 	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/rest"
@@ -14,13 +15,25 @@ import (
 	"github.com/smeltry-io/smeltry/internal/auth"
 )
 
-// New returns a dynamic client using the stored OIDC token as Bearer.
-// It resolves the server URL from KUBECONFIG / in-cluster config, then
-// overrides the auth with the smeltry token.
+// EnvToken mirrors cmd.EnvToken to avoid an import cycle.
+// Both constants must remain identical.
+const envToken = "SMELTRY_TOKEN"
+
+// New returns a dynamic client using the OIDC Bearer token.
+// Token resolution order:
+//  1. SMELTRY_TOKEN environment variable (CI — nothing written to disk)
+//  2. Stored token from ~/.config/smeltry/token.json
+//
+// The server URL is resolved from KUBECONFIG / in-cluster config, then
+// optionally overridden by serverOverride.
 func New(serverOverride string) (dynamic.Interface, error) {
-	td, err := auth.Load()
-	if err != nil {
-		return nil, err
+	bearer := os.Getenv(envToken)
+	if bearer == "" {
+		td, err := auth.Load()
+		if err != nil {
+			return nil, err
+		}
+		bearer = td.AccessToken
 	}
 
 	cfg, err := baseConfig(serverOverride)
@@ -28,7 +41,7 @@ func New(serverOverride string) (dynamic.Interface, error) {
 		return nil, fmt.Errorf("resolving kubeconfig: %w", err)
 	}
 
-	cfg.BearerToken = td.AccessToken
+	cfg.BearerToken = bearer
 	cfg.BearerTokenFile = ""
 	// Clear any credential provider set by kubeconfig; the Bearer token is enough.
 	cfg.Username = ""

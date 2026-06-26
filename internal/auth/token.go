@@ -70,7 +70,17 @@ func Save(td *TokenData) error {
 	if err != nil {
 		return fmt.Errorf("marshalling token: %w", err)
 	}
-	return os.WriteFile(path, data, 0600)
+	// O_TRUNC ensures the file is replaced atomically with 0600 permissions
+	// even if a pre-existing file had broader permissions.
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0600)
+	if err != nil {
+		return fmt.Errorf("opening token file: %w", err)
+	}
+	defer f.Close()
+	if _, err := f.Write(data); err != nil {
+		return fmt.Errorf("writing token file: %w", err)
+	}
+	return nil
 }
 
 // Delete removes the stored token from disk.

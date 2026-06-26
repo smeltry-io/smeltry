@@ -5,11 +5,17 @@ package cmd
 
 import (
 	"fmt"
+	"os"
 
 	"github.com/spf13/cobra"
 
 	"github.com/smeltry-io/smeltry/internal/auth"
 )
+
+// EnvToken is the environment variable used to pass a Bearer token in CI
+// without saving anything to disk. It takes precedence over the stored token.
+// Usage: SMELTRY_TOKEN=<bearer> smeltry cluster list -n tenant-acme
+const EnvToken = "SMELTRY_TOKEN"
 
 func newAuthCmd() *cobra.Command {
 	cmd := &cobra.Command{
@@ -21,19 +27,18 @@ func newAuthCmd() *cobra.Command {
 }
 
 func newAuthLoginCmd() *cobra.Command {
-	var tokenFlag string
-
 	cmd := &cobra.Command{
 		Use:   "login",
-		Short: "Authenticate via OIDC device flow (or --token for CI)",
+		Short: "Authenticate via OIDC device flow",
+		Long: `Authenticate with the Smeltry platform using the OIDC device flow.
+
+For CI/non-interactive environments, skip this command and set the
+SMELTRY_TOKEN environment variable instead — the token is never written
+to disk and is read fresh on every invocation.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			if tokenFlag != "" {
-				return loginWithToken(tokenFlag)
-			}
 			return loginDeviceFlow()
 		},
 	}
-	cmd.Flags().StringVar(&tokenFlag, "token", "", "Use a pre-obtained Bearer token (for CI/non-interactive use)")
 	return cmd
 }
 
@@ -56,6 +61,11 @@ func newAuthStatusCmd() *cobra.Command {
 		Use:   "status",
 		Short: "Show current authentication status",
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if t := os.Getenv(EnvToken); t != "" {
+				fmt.Fprintln(cmd.OutOrStdout(), "Mode:    CI (SMELTRY_TOKEN env var)")
+				fmt.Fprintln(cmd.OutOrStdout(), "Status:  token provided via environment, not stored on disk")
+				return nil
+			}
 			td, err := auth.Load()
 			if err != nil {
 				return err
@@ -74,19 +84,8 @@ func newAuthStatusCmd() *cobra.Command {
 	}
 }
 
-// loginWithToken stores a pre-obtained access token directly.
-// Groups and email are not decoded from the token in v1 — the user provides
-// only the raw Bearer string (suitable for CI pipelines).
-func loginWithToken(token string) error {
-	return auth.Save(&auth.TokenData{
-		AccessToken: token,
-		// Expiry left zero — IsExpired() will return true immediately on the
-		// next command, forcing a re-login. For CI each invocation provides --token.
-	})
-}
-
 // loginDeviceFlow is a placeholder for the OIDC device flow implementation.
 // It will be wired to the Authentik issuer in a subsequent story.
 func loginDeviceFlow() error {
-	return fmt.Errorf("device flow not yet implemented — use --token for now")
+	return fmt.Errorf("device flow not yet implemented — set SMELTRY_TOKEN for now")
 }

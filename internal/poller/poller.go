@@ -17,6 +17,15 @@ const DefaultInterval = 2 * time.Second
 // It returns the last non-nil error from cond if the context expires.
 func UntilDone(ctx context.Context, interval time.Duration, cond func(ctx context.Context) (done bool, err error)) error {
 	var lastErr error
+
+	// Check immediately before starting the ticker so an already-satisfied
+	// condition returns without waiting one full interval.
+	if done, err := cond(ctx); err != nil {
+		lastErr = err
+	} else if done {
+		return nil
+	}
+
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
 

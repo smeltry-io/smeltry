@@ -9,11 +9,11 @@ import (
 
 func newInstallCmd() *cobra.Command {
 	var (
-		version   string
-		namespace string
-		values    []string
-		setValues []string
-		dryRun    bool
+		version      string
+		installNS    string
+		values       []string
+		setValues    []string
+		dryRun       bool
 	)
 
 	cmd := &cobra.Command{
@@ -22,7 +22,8 @@ func newInstallCmd() *cobra.Command {
 		RunE:  notImplemented,
 	}
 	cmd.Flags().StringVar(&version, "version", "latest", "Chart version to install")
-	cmd.Flags().StringVarP(&namespace, "namespace", "n", "smeltry-system", "Namespace to deploy into")
+	// install uses its own --install-namespace to avoid shadowing the global -n flag.
+	cmd.Flags().StringVar(&installNS, "install-namespace", "smeltry-system", "Namespace to deploy the operator into")
 	cmd.Flags().StringArrayVarP(&values, "values", "f", nil, "Values file(s) (repeatable)")
 	cmd.Flags().StringArrayVar(&setValues, "set", nil, "Set individual values (repeatable, e.g. --set key=val)")
 	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "Print manifests without applying")

@@ -12,15 +12,21 @@ import (
 
 func TestUntilDone_SucceedsImmediately(t *testing.T) {
 	calls := 0
-	err := UntilDone(context.Background(), 10*time.Millisecond, func(_ context.Context) (bool, error) {
+	start := time.Now()
+	err := UntilDone(context.Background(), time.Hour, func(_ context.Context) (bool, error) {
 		calls++
 		return true, nil
 	})
+	elapsed := time.Since(start)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if calls != 1 {
 		t.Errorf("expected 1 call, got %d", calls)
+	}
+	// With interval=1h and immediate success, the function must return in well under 1s.
+	if elapsed > time.Second {
+		t.Errorf("expected immediate return, took %v", elapsed)
 	}
 }
 
