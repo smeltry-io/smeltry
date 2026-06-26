@@ -32,12 +32,17 @@ On subsequent runs it upgrades the existing release in-place.
 The chart is pulled from the OCI registry:
   ` + helminstall.DefaultChart,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			timeout, err := waitTimeout()
-			if err != nil {
-				return err
-			}
-			if !global.Wait {
-				timeout = 5 * time.Minute // sensible default even without --wait
+			var timeout time.Duration
+			if global.Timeout != "" {
+				var err error
+				timeout, err = waitTimeout()
+				if err != nil {
+					return err
+				}
+			} else if global.Wait {
+				timeout = 10 * time.Minute
+			} else {
+				timeout = 5 * time.Minute
 			}
 
 			opts := helminstall.Options{

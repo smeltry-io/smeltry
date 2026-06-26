@@ -6,9 +6,9 @@
 package helminstall
 
 import (
+	"errors"
 	"fmt"
 	"io"
-	"log"
 	"time"
 
 	"helm.sh/helm/v3/pkg/action"
@@ -19,6 +19,7 @@ import (
 	"helm.sh/helm/v3/pkg/getter"
 	"helm.sh/helm/v3/pkg/registry"
 	"helm.sh/helm/v3/pkg/release"
+	"helm.sh/helm/v3/pkg/storage/driver"
 )
 
 const (
@@ -56,9 +57,7 @@ func Install(w io.Writer, opts Options) error {
 
 	cfg := new(action.Configuration)
 	if err := cfg.Init(env.RESTClientGetter(), opts.Namespace, "secret",
-		func(format string, v ...interface{}) {
-			log.Printf(format, v...)
-		}); err != nil {
+		func(string, ...interface{}) {}); err != nil {
 		return fmt.Errorf("initialising Helm configuration: %w", err)
 	}
 	cfg.RegistryClient = rc
@@ -76,8 +75,11 @@ func Install(w io.Writer, opts Options) error {
 	// Check whether the release already exists to decide install vs upgrade.
 	hist := action.NewHistory(cfg)
 	hist.Max = 1
-	_, err = hist.Run(DefaultRelease)
-	exists := err == nil
+	_, histErr := hist.Run(DefaultRelease)
+	if histErr != nil && !errors.Is(histErr, driver.ErrReleaseNotFound) {
+		return fmt.Errorf("checking release history: %w", histErr)
+	}
+	exists := histErr == nil
 
 	var rel *release.Release
 	if exists {
@@ -143,10 +145,4 @@ func buildValues(valueFiles, setVals []string) (map[string]interface{}, error) {
 	}
 	providers := getter.All(cli.New())
 	return opts.MergeValues(providers)
-}
-
-// chartRef returns the OCI chart reference. The version is passed separately
-// to Helm actions rather than embedded in the ref.
-func chartRef(_ string) string {
-	return DefaultChart
 }

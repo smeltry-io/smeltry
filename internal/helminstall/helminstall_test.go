@@ -6,21 +6,28 @@ package helminstall
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
 func TestBuildValues_SetOverridesFile(t *testing.T) {
-	// Write a values file.
 	dir := t.TempDir()
 	vf := filepath.Join(dir, "vals.yaml")
+	// File sets replicaCount=1; --set must win with replicaCount=3.
 	os.WriteFile(vf, []byte("replicaCount: 1\nimage:\n  tag: v0.1.0\n"), 0600)
 
 	vals, err := buildValues([]string{vf}, []string{"replicaCount=3"})
 	if err != nil {
 		t.Fatalf("buildValues: %v", err)
 	}
-	if vals["replicaCount"] != int64(3) && vals["replicaCount"] != float64(3) {
-		t.Errorf("expected replicaCount=3 (--set overrides file), got %v", vals["replicaCount"])
+	got := vals["replicaCount"]
+	if got != int64(3) && got != float64(3) {
+		t.Errorf("--set should override file: want replicaCount=3, got %v", got)
+	}
+	// Sanity-check: image.tag from the file is still present.
+	img, _ := vals["image"].(map[string]interface{})
+	if img["tag"] != "v0.1.0" {
+		t.Errorf("file value image.tag should be preserved, got %v", img["tag"])
 	}
 }
 
@@ -66,16 +73,8 @@ func TestBuildValues_Empty(t *testing.T) {
 	}
 }
 
-func TestChartRef_WithVersion(t *testing.T) {
-	ref := chartRef("v1.2.3")
-	if ref != DefaultChart {
-		t.Errorf("chartRef should return DefaultChart regardless of version, got %q", ref)
-	}
-}
-
-func TestChartRef_Latest(t *testing.T) {
-	ref := chartRef("")
-	if ref != DefaultChart {
-		t.Errorf("chartRef(\"\") should return DefaultChart, got %q", ref)
+func TestDefaultChart_IsOCIRef(t *testing.T) {
+	if !strings.HasPrefix(DefaultChart, "oci://") {
+		t.Errorf("DefaultChart should be an OCI reference, got %q", DefaultChart)
 	}
 }
