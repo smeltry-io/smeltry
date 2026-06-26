@@ -17,9 +17,11 @@ import (
 	"sigs.k8s.io/yaml"
 
 	"github.com/smeltry-io/smeltry/internal/addon"
+	"github.com/smeltry-io/smeltry/internal/addonprofile"
 	"github.com/smeltry-io/smeltry/internal/clusterclaim"
 	"github.com/smeltry-io/smeltry/internal/k8sclient"
 	"github.com/smeltry-io/smeltry/internal/poller"
+	"github.com/smeltry-io/smeltry/internal/siteconfig"
 	"github.com/smeltry-io/smeltry/internal/table"
 )
 
@@ -85,10 +87,10 @@ func newClusterCreateCmd() *cobra.Command {
 		Short:   "Create a ClusterClaim (interactive wizard or --file)",
 		PreRunE: requireNamespace,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			if file == "" {
-				return notImplemented(cmd, args) // wizard — next story
+			if file != "" {
+				return clusterCreateFromFile(cmd, file)
 			}
-			return clusterCreateFromFile(cmd, file)
+			return clusterCreateWizard(cmd)
 		},
 	}
 	cmd.Flags().StringVarP(&file, "file", "f", "", "Path to a ClusterClaim manifest (skips interactive wizard)")
@@ -246,6 +248,37 @@ func encodeYAML(cmd *cobra.Command, v any) error {
 	}
 	_, err = fmt.Fprint(cmd.OutOrStdout(), string(b))
 	return err
+}
+
+// clusterCreateWizard runs the interactive wizard and creates the ClusterClaim.
+func clusterCreateWizard(cmd *cobra.Command) error {
+	dyn, err := k8sclient.New(global.Server)
+	if err != nil {
+		return err
+	}
+	sites, err := siteconfig.NewClient(dyn).List(context.Background())
+	if err != nil {
+		return err
+	}
+	profiles, err := addonprofile.NewClient(dyn).List(context.Background())
+	if err != nil {
+		return err
+	}
+	spec, err := runWizard(cmd.OutOrStdout(), os.Stdin, sites, profiles)
+	if err == errWizardAborted {
+		fmt.Fprintln(cmd.OutOrStdout(), "Aborted.")
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	obj := clusterSpecToObject(global.Namespace, spec)
+	cc, err := clusterclaim.NewClient(dyn).Create(context.Background(), global.Namespace, obj)
+	if err != nil {
+		return err
+	}
+	fmt.Fprintf(cmd.OutOrStdout(), "ClusterClaim %q created (phase: %s).\n", cc.Name, cc.Phase)
+	return nil
 }
 
 // clusterCreateFromFile reads a YAML/JSON manifest and creates the ClusterClaim.
